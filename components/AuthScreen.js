@@ -68,7 +68,7 @@ export default function AuthScreen({ onAuthed }) {
               type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder="e.g. priya92"
+              placeholder="e.g. Tuneer18"
               autoComplete="username"
               required
               minLength={3}
