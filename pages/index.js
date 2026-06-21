@@ -6,9 +6,12 @@ import DonutChart from "@/components/DonutChart";
 import TrendBars from "@/components/TrendBars";
 import SparkleBurst from "@/components/SparkleBurst";
 import BustedBanner from "@/components/BustedBanner";
+import MilestoneBanner from "@/components/MilestoneBanner";
 import LimitsModal from "@/components/LimitsModal";
+import SwipeToDelete from "@/components/SwipeToDelete";
 import { CATEGORIES } from "@/lib/categories";
 import { formatMoney } from "@/lib/format";
+import { computeStreak, generateRecap, detectNewMilestones } from "@/lib/insights";
 
 function startOfDay(d) {
   const x = new Date(d);
@@ -71,6 +74,9 @@ export default function Home() {
   const [overDaily, setOverDaily] = useState(false); // true once today's limit is crossed
   const [overMonthly, setOverMonthly] = useState(false); // true once this month's limit is crossed
 
+  const [seenMilestones, setSeenMilestones] = useState([]);
+  const [activeMilestone, setActiveMilestone] = useState(null);
+
   // ---- has the "Busted" popup already been shown for this period? ----
   function bustedShownKey(username, period, key) {
     return `tuppence_busted_${username}_${period}_${key}`;
@@ -100,7 +106,7 @@ export default function Home() {
       .catch(() => setUser(null));
   }, []);
 
-  // ---- load expenses + incomes + settings once logged in ----
+  // ---- load expenses + incomes + settings + milestones once logged in ----
   useEffect(() => {
     if (!user) return;
     setLoadingData(true);
@@ -108,12 +114,14 @@ export default function Home() {
       fetch("/api/expenses").then((r) => r.json()),
       fetch("/api/incomes").then((r) => r.json()),
       fetch("/api/settings").then((r) => r.json()),
+      fetch("/api/milestones").then((r) => r.json()),
     ])
-      .then(([expData, incData, setData]) => {
+      .then(([expData, incData, setData, milestoneData]) => {
         setExpenses(expData.expenses || []);
         setIncomes(incData.incomes || []);
         setDailyLimit(setData.dailyLimit ?? null);
         setMonthlyLimit(setData.monthlyLimit ?? null);
+        setSeenMilestones(milestoneData.seen || []);
       })
       .catch(() => {
         setExpenses([]);
@@ -128,8 +136,10 @@ export default function Home() {
     const now = new Date();
     const dayStart = startOfDay(now);
     const wkStart = startOfWeek(now);
+    const lastWkStart = new Date(wkStart.getTime() - 7 * 86400000);
     let todaySum = 0,
       weekSum = 0,
+      lastWeekSum = 0,
       monthSum = 0;
     const monthByCat = {};
 
@@ -137,6 +147,7 @@ export default function Home() {
       const d = new Date(x.ts);
       if (d >= dayStart) todaySum += x.amount;
       if (d >= wkStart) weekSum += x.amount;
+      if (d >= lastWkStart && d < wkStart) lastWeekSum += x.amount;
       if (sameMonth(d, now)) {
         monthSum += x.amount;
         monthByCat[x.category] = (monthByCat[x.category] || 0) + x.amount;
@@ -164,6 +175,9 @@ export default function Home() {
     const dailyPct = dailyLimit ? (todaySum / dailyLimit) * 100 : null;
     const monthlyPct = monthlyLimit ? (monthSum / monthlyLimit) * 100 : null;
 
+    const streak = computeStreak(expenses, now);
+    const recap = generateRecap({ todaySum, weekSum, lastWeekSum, monthByCat, monthSum });
+
     return {
       todaySum,
       weekSum,
@@ -174,6 +188,8 @@ export default function Home() {
       balance,
       dailyPct,
       monthlyPct,
+      streak,
+      recap,
     };
   }, [expenses, incomes, dailyLimit, monthlyLimit]);
 
@@ -182,6 +198,23 @@ export default function Home() {
     setOverDaily(Boolean(dailyLimit && stats.todaySum > dailyLimit));
     setOverMonthly(Boolean(monthlyLimit && stats.monthSum > monthlyLimit));
   }, [stats.todaySum, stats.monthSum, dailyLimit, monthlyLimit]);
+
+  // ---- detect newly-reached milestones once data has loaded ----
+  useEffect(() => {
+    if (loadingData || expenses.length === 0) return;
+    const newOnes = detectNewMilestones(expenses, seenMilestones);
+    if (newOnes.length > 0 && !activeMilestone) {
+      const next = newOnes[0];
+      setActiveMilestone(next);
+      setSeenMilestones((prev) => [...prev, next.key]);
+      fetch("/api/milestones", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: next.key }),
+      }).catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expenses.length, loadingData]);
 
   const grouped = useMemo(() => {
     const taggedExpenses = expenses.map((x) => ({ ...x, kind: "expense" }));
@@ -423,7 +456,22 @@ export default function Home() {
                 Hey {capitalize(user.username)} — here&apos;s the damage
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2.5">
+              {stats.streak.current >= 2 && (
+                <div
+                  className="flex items-center gap-1 rounded-full"
+                  style={{
+                    background: "rgba(244,239,227,.1)",
+                    padding: "4px 9px 4px 7px",
+                  }}
+                  title={`${stats.streak.current}-day logging streak`}
+                >
+                  <span style={{ fontSize: 13 }}>🔥</span>
+                  <span className="mono font-semibold" style={{ fontSize: 12.5, color: "var(--gold)" }}>
+                    {stats.streak.current}
+                  </span>
+                </div>
+              )}
               <CoinMascot
                 expression={justAdded ? coinFace : (overDaily || overMonthly ? "worried" : "idle")}
                 size={40}
@@ -431,6 +479,15 @@ export default function Home() {
               />
             </div>
           </div>
+
+          {stats.recap && (
+            <div
+              className="mt-2.5 text-xs"
+              style={{ color: "rgba(244,239,227,.65)", lineHeight: 1.4, maxWidth: "85%" }}
+            >
+              {stats.recap}
+            </div>
+          )}
 
           <div className="flex items-end justify-between mt-6">
             <div>
@@ -698,10 +755,13 @@ export default function Home() {
                 Loading your ledger…
               </div>
             ) : grouped.length === 0 ? (
-              <div className="text-center py-9 px-5" style={{ color: "var(--muted)", fontSize: 13.5, lineHeight: 1.6 }}>
-                Nothing logged yet.
-                <br />
-                Add your first expense above and it&apos;ll show up here.
+              <div className="text-center py-10 px-5">
+                <CoinMascot expression="idle" size={48} className="coin-bob" style={{ margin: "0 auto 12px" }} />
+                <div style={{ color: "var(--muted)", fontSize: 13.5, lineHeight: 1.6 }}>
+                  Tup&apos;s waiting on your first entry.
+                  <br />
+                  Add an expense above and it&apos;ll show up here.
+                </div>
               </div>
             ) : (
               grouped.map((group) => (
@@ -717,54 +777,47 @@ export default function Home() {
                     const cat = isIncome ? null : CATEGORIES[x.category] || CATEGORIES.other;
                     const d = new Date(x.ts);
                     return (
-                      <div
-                        key={`${x.kind}-${x.id}`}
-                        className={`flex items-center gap-3 relative ${idx === 0 ? "row-in" : ""}`}
-                        style={{
-                          padding: "11px 14px 11px 16px",
-                          borderBottom: "1px dashed var(--paper-line)",
-                          background: "var(--paper)",
-                        }}
-                      >
+                      <SwipeToDelete key={`${x.kind}-${x.id}`} onDelete={() => handleDelete(x.id, x.kind)}>
                         <div
-                          className="rounded-full flex items-center justify-center font-bold flex-shrink-0"
+                          className={`flex items-center gap-3 relative ${idx === 0 ? "row-in" : ""}`}
                           style={{
-                            width: 38,
-                            height: 38,
-                            fontSize: isIncome ? 16 : 7,
-                            letterSpacing: ".02em",
-                            border: `1.5px dashed ${isIncome ? "var(--mint)" : cat.color}`,
-                            color: isIncome ? "var(--mint)" : cat.color,
-                            transform: "rotate(-5deg)",
+                            padding: "11px 14px 11px 16px",
+                            borderBottom: "1px dashed var(--paper-line)",
+                            background: "var(--paper)",
                           }}
                         >
-                          {isIncome ? "+" : cat.code}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="font-medium truncate" style={{ fontSize: 14 }}>
-                            {isIncome ? x.source : x.reason}
+                          <div
+                            className="rounded-full flex items-center justify-center font-bold flex-shrink-0"
+                            style={{
+                              width: 38,
+                              height: 38,
+                              fontSize: isIncome ? 16 : 7,
+                              letterSpacing: ".02em",
+                              border: `1.5px dashed ${isIncome ? "var(--mint)" : cat.color}`,
+                              color: isIncome ? "var(--mint)" : cat.color,
+                              transform: "rotate(-5deg)",
+                            }}
+                          >
+                            {isIncome ? "+" : cat.code}
                           </div>
-                          <div className="mt-0.5" style={{ fontSize: 11, color: "var(--muted)" }}>
-                            {isIncome ? "Income" : cat.label} &middot;{" "}
-                            {d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium truncate" style={{ fontSize: 14 }}>
+                              {isIncome ? x.source : x.reason}
+                            </div>
+                            <div className="mt-0.5" style={{ fontSize: 11, color: "var(--muted)" }}>
+                              {isIncome ? "Income" : cat.label} &middot;{" "}
+                              {d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+                            </div>
+                          </div>
+                          <div
+                            className="mono font-semibold whitespace-nowrap"
+                            style={{ fontSize: 14.5, color: isIncome ? "var(--mint)" : "var(--rust)" }}
+                          >
+                            {isIncome ? "+" : ""}
+                            {formatMoney(x.amount)}
                           </div>
                         </div>
-                        <div
-                          className="mono font-semibold whitespace-nowrap"
-                          style={{ fontSize: 14.5, color: isIncome ? "var(--mint)" : "var(--rust)" }}
-                        >
-                          {isIncome ? "+" : ""}
-                          {formatMoney(x.amount)}
-                        </div>
-                        <button
-                          onClick={() => handleDelete(x.id, x.kind)}
-                          aria-label="Delete entry"
-                          className="leading-none"
-                          style={{ background: "none", border: "none", color: "var(--muted)", fontSize: 16, padding: "4px 2px 4px 8px", cursor: "pointer" }}
-                        >
-                          &times;
-                        </button>
-                      </div>
+                      </SwipeToDelete>
                     );
                   })}
                 </div>
@@ -790,6 +843,10 @@ export default function Home() {
 
       {bustedType && (
         <BustedBanner type={bustedType} onDismiss={() => setBustedType(null)} />
+      )}
+
+      {!bustedType && activeMilestone && (
+        <MilestoneBanner milestone={activeMilestone} onDismiss={() => setActiveMilestone(null)} />
       )}
     </>
   );
