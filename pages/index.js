@@ -25,6 +25,12 @@ function startOfWeek(d) {
 function sameMonth(a, b) {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
 }
+function dayKey(d) {
+  return d.toISOString().slice(0, 10); // YYYY-MM-DD
+}
+function monthKey(d) {
+  return d.toISOString().slice(0, 7); // YYYY-MM
+}
 function groupLabel(d) {
   const now = new Date();
   const today = startOfDay(now);
@@ -58,8 +64,29 @@ export default function Home() {
   const [monthlyLimit, setMonthlyLimit] = useState(null);
   const [showLimitsModal, setShowLimitsModal] = useState(false);
   const [bustedType, setBustedType] = useState(null); // null | "daily" | "monthly"
-  const [warnedDaily, setWarnedDaily] = useState(false);
-  const [warnedMonthly, setWarnedMonthly] = useState(false);
+  const [overDaily, setOverDaily] = useState(false); // true once today's limit is crossed
+  const [overMonthly, setOverMonthly] = useState(false); // true once this month's limit is crossed
+
+  // ---- has the "Busted" popup already been shown for this period? ----
+  function bustedShownKey(username, period, key) {
+    return `tuppence_busted_${username}_${period}_${key}`;
+  }
+  function hasShownBusted(period, key) {
+    if (!user || typeof window === "undefined") return false;
+    try {
+      return window.localStorage.getItem(bustedShownKey(user.username, period, key)) === "1";
+    } catch {
+      return false;
+    }
+  }
+  function markBustedShown(period, key) {
+    if (!user || typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(bustedShownKey(user.username, period, key), "1");
+    } catch {
+      // ignore storage errors (e.g. private browsing)
+    }
+  }
 
   // ---- check session on load ----
   useEffect(() => {
@@ -145,6 +172,12 @@ export default function Home() {
       monthlyPct,
     };
   }, [expenses, incomes, dailyLimit, monthlyLimit]);
+
+  // ---- keep the persistent over-limit badges in sync (covers page refresh too) ----
+  useEffect(() => {
+    setOverDaily(Boolean(dailyLimit && stats.todaySum > dailyLimit));
+    setOverMonthly(Boolean(monthlyLimit && stats.monthSum > monthlyLimit));
+  }, [stats.todaySum, stats.monthSum, dailyLimit, monthlyLimit]);
 
   const grouped = useMemo(() => {
     const taggedExpenses = expenses.map((x) => ({ ...x, kind: "expense" }));
@@ -251,20 +284,23 @@ export default function Home() {
           if (sameMonth(d, now)) newMonthSum += x.amount;
         });
 
-        const dailyOver = dailyLimit && newTodaySum > dailyLimit;
-        const monthlyOver = monthlyLimit && newMonthSum > monthlyLimit;
-        const dailyWarn = dailyLimit && !dailyOver && newTodaySum >= dailyLimit * 0.8;
-        const monthlyWarn = monthlyLimit && !monthlyOver && newMonthSum >= monthlyLimit * 0.8;
+        const dailyOver = Boolean(dailyLimit && newTodaySum > dailyLimit);
+        const monthlyOver = Boolean(monthlyLimit && newMonthSum > monthlyLimit);
 
-        if (dailyOver || monthlyOver) {
+        const dKey = dayKey(now);
+        const mKey = monthKey(now);
+        const dailyFirstTime = dailyOver && !hasShownBusted("daily", dKey);
+        const monthlyFirstTime = monthlyOver && !hasShownBusted("monthly", mKey);
+
+        if (dailyFirstTime || monthlyFirstTime) {
           setCoinFace("busted");
-          setBustedType(dailyOver ? "daily" : "monthly");
+          setBustedType(dailyFirstTime ? "daily" : "monthly");
+          if (dailyFirstTime) markBustedShown("daily", dKey);
+          if (monthlyFirstTime) markBustedShown("monthly", mKey);
         } else {
           setCoinFace("happy");
           setTimeout(() => setCoinFace("idle"), 1400);
         }
-        setWarnedDaily(Boolean(dailyWarn || dailyOver));
-        setWarnedMonthly(Boolean(monthlyWarn || monthlyOver));
 
         setTimeout(() => setJustAdded(false), 900);
       }
@@ -386,7 +422,11 @@ export default function Home() {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <CoinMascot expression={coinFace} size={40} className={justAdded ? "coin-spin" : "coin-bob"} />
+              <CoinMascot
+                expression={justAdded ? coinFace : (overDaily || overMonthly ? "worried" : "idle")}
+                size={40}
+                className={justAdded ? "coin-spin" : "coin-bob"}
+              />
             </div>
           </div>
 
@@ -420,9 +460,16 @@ export default function Home() {
 
           <button
             onClick={() => setShowLimitsModal(true)}
-            className="absolute top-2 right-14 text-[10px] px-2 py-1"
+            className="absolute top-2 right-14 text-[10px] px-2 py-1 flex items-center gap-1"
             style={{ color: "rgba(244,239,227,.4)" }}
           >
+            {(overDaily || overMonthly) && (
+              <span
+                className="inline-block rounded-full"
+                style={{ width: 6, height: 6, background: "var(--rust)" }}
+                aria-label="Over a spending limit"
+              />
+            )}
             limits
           </button>
           <button
