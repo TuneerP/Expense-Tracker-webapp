@@ -457,21 +457,6 @@ export default function Home() {
               </div>
             </div>
             <div className="flex items-center gap-2.5">
-              {stats.streak.current >= 2 && (
-                <div
-                  className="flex items-center gap-1 rounded-full"
-                  style={{
-                    background: "rgba(244,239,227,.1)",
-                    padding: "4px 9px 4px 7px",
-                  }}
-                  title={`${stats.streak.current}-day logging streak`}
-                >
-                  <span style={{ fontSize: 13 }}>🔥</span>
-                  <span className="mono font-semibold" style={{ fontSize: 12.5, color: "var(--gold)" }}>
-                    {stats.streak.current}
-                  </span>
-                </div>
-              )}
               <CoinMascot
                 expression={justAdded ? coinFace : (overDaily || overMonthly ? "worried" : "idle")}
                 size={40}
@@ -479,15 +464,6 @@ export default function Home() {
               />
             </div>
           </div>
-
-          {stats.recap && (
-            <div
-              className="mt-2.5 text-xs"
-              style={{ color: "rgba(244,239,227,.65)", lineHeight: 1.4, maxWidth: "85%" }}
-            >
-              {stats.recap}
-            </div>
-          )}
 
           <div className="flex items-end justify-between mt-6">
             <div>
@@ -500,6 +476,20 @@ export default function Home() {
               >
                 spent this month
               </div>
+              {stats.recap && (
+                <div
+                  className="mt-2 flex items-start gap-1.5"
+                  style={{ maxWidth: 230 }}
+                >
+                  <span style={{ fontSize: 12, lineHeight: 1.4 }}>🪙</span>
+                  <span
+                    className="text-xs"
+                    style={{ color: "var(--gold)", lineHeight: 1.4, fontWeight: 500 }}
+                  >
+                    {stats.recap}
+                  </span>
+                </div>
+              )}
             </div>
             <div className="text-right pb-1">
               <div
@@ -517,27 +507,41 @@ export default function Home() {
             </div>
           </div>
 
-          <button
-            onClick={() => setShowLimitsModal(true)}
-            className="absolute top-2 right-14 text-[10px] px-2 py-1 flex items-center gap-1"
-            style={{ color: "rgba(244,239,227,.4)" }}
-          >
-            {(overDaily || overMonthly) && (
-              <span
-                className="inline-block rounded-full"
-                style={{ width: 6, height: 6, background: "var(--rust)" }}
-                aria-label="Over a spending limit"
-              />
+          <div className="absolute top-2 right-2 flex items-center gap-1.5">
+            {stats.streak.current >= 2 && (
+              <div
+                className="flex items-center gap-1 rounded-full"
+                style={{ background: "rgba(244,239,227,.1)", padding: "3px 8px 3px 6px" }}
+                title={`${stats.streak.current}-day logging streak`}
+              >
+                <span style={{ fontSize: 11.5 }}>🔥</span>
+                <span className="mono font-semibold" style={{ fontSize: 11, color: "var(--gold)" }}>
+                  {stats.streak.current}
+                </span>
+              </div>
             )}
-            limits
-          </button>
-          <button
-            onClick={handleLogout}
-            className="absolute top-2 right-2 text-[10px] px-2 py-1"
-            style={{ color: "rgba(244,239,227,.4)" }}
-          >
-            log out
-          </button>
+            <button
+              onClick={() => setShowLimitsModal(true)}
+              className="text-[10px] px-2 py-1 flex items-center gap-1"
+              style={{ color: "rgba(244,239,227,.4)" }}
+            >
+              {(overDaily || overMonthly) && (
+                <span
+                  className="inline-block rounded-full"
+                  style={{ width: 6, height: 6, background: "var(--rust)" }}
+                  aria-label="Over a spending limit"
+                />
+              )}
+              limits
+            </button>
+            <button
+              onClick={handleLogout}
+              className="text-[10px] px-2 py-1"
+              style={{ color: "rgba(244,239,227,.4)" }}
+            >
+              log out
+            </button>
+          </div>
         </div>
 
         {/* ---- Quick add ---- */}
