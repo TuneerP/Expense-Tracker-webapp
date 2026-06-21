@@ -31,6 +31,10 @@ function dayKey(d) {
 function monthKey(d) {
   return d.toISOString().slice(0, 7); // YYYY-MM
 }
+function capitalize(s) {
+  if (!s) return s;
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
 function groupLabel(d) {
   const now = new Date();
   const today = startOfDay(now);
@@ -418,7 +422,7 @@ export default function Home() {
                 Tuppence
               </div>
               <div className="text-xs mt-0.5" style={{ color: "rgba(244,239,227,.55)" }}>
-                hey {user.username} — here&apos;s the damage
+                Hey {capitalize(user.username)} — here&apos;s the damage
               </div>
             </div>
             <div className="flex items-center gap-2">
