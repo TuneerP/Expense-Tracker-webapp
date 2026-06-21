@@ -5,6 +5,8 @@ import CoinMascot from "@/components/CoinMascot";
 import DonutChart from "@/components/DonutChart";
 import TrendBars from "@/components/TrendBars";
 import SparkleBurst from "@/components/SparkleBurst";
+import BustedBanner from "@/components/BustedBanner";
+import LimitsModal from "@/components/LimitsModal";
 import { CATEGORIES } from "@/lib/categories";
 import { formatMoney } from "@/lib/format";
 
@@ -40,8 +42,10 @@ function groupLabel(d) {
 export default function Home() {
   const [user, setUser] = useState(undefined); // undefined = checking, null = logged out
   const [expenses, setExpenses] = useState([]);
-  const [loadingExpenses, setLoadingExpenses] = useState(false);
+  const [incomes, setIncomes] = useState([]);
+  const [loadingData, setLoadingData] = useState(false);
 
+  const [mode, setMode] = useState("expense"); // "expense" | "income"
   const [amount, setAmount] = useState("");
   const [reason, setReason] = useState("");
   const [category, setCategory] = useState("other");
@@ -49,6 +53,13 @@ export default function Home() {
   const [submitting, setSubmitting] = useState(false);
   const [justAdded, setJustAdded] = useState(false);
   const [coinFace, setCoinFace] = useState("idle");
+
+  const [dailyLimit, setDailyLimit] = useState(null);
+  const [monthlyLimit, setMonthlyLimit] = useState(null);
+  const [showLimitsModal, setShowLimitsModal] = useState(false);
+  const [bustedType, setBustedType] = useState(null); // null | "daily" | "monthly"
+  const [warnedDaily, setWarnedDaily] = useState(false);
+  const [warnedMonthly, setWarnedMonthly] = useState(false);
 
   // ---- check session on load ----
   useEffect(() => {
@@ -58,15 +69,26 @@ export default function Home() {
       .catch(() => setUser(null));
   }, []);
 
-  // ---- load expenses once logged in ----
+  // ---- load expenses + incomes + settings once logged in ----
   useEffect(() => {
     if (!user) return;
-    setLoadingExpenses(true);
-    fetch("/api/expenses")
-      .then((r) => r.json())
-      .then((d) => setExpenses(d.expenses || []))
-      .catch(() => setExpenses([]))
-      .finally(() => setLoadingExpenses(false));
+    setLoadingData(true);
+    Promise.all([
+      fetch("/api/expenses").then((r) => r.json()),
+      fetch("/api/incomes").then((r) => r.json()),
+      fetch("/api/settings").then((r) => r.json()),
+    ])
+      .then(([expData, incData, setData]) => {
+        setExpenses(expData.expenses || []);
+        setIncomes(incData.incomes || []);
+        setDailyLimit(setData.dailyLimit ?? null);
+        setMonthlyLimit(setData.monthlyLimit ?? null);
+      })
+      .catch(() => {
+        setExpenses([]);
+        setIncomes([]);
+      })
+      .finally(() => setLoadingData(false));
   }, [user]);
 
   // ---- live category preview while typing reason (client-side, instant) ----
@@ -104,11 +126,30 @@ export default function Home() {
     });
     const monthLabels = months.map((m) => m.toLocaleDateString("en-IN", { month: "short" }));
 
-    return { todaySum, weekSum, monthSum, monthByCat, monthLabels, sums };
-  }, [expenses]);
+    const totalIncome = incomes.reduce((sum, x) => sum + x.amount, 0);
+    const totalExpense = expenses.reduce((sum, x) => sum + x.amount, 0);
+    const balance = totalIncome - totalExpense;
+
+    const dailyPct = dailyLimit ? (todaySum / dailyLimit) * 100 : null;
+    const monthlyPct = monthlyLimit ? (monthSum / monthlyLimit) * 100 : null;
+
+    return {
+      todaySum,
+      weekSum,
+      monthSum,
+      monthByCat,
+      monthLabels,
+      sums,
+      balance,
+      dailyPct,
+      monthlyPct,
+    };
+  }, [expenses, incomes, dailyLimit, monthlyLimit]);
 
   const grouped = useMemo(() => {
-    const sorted = [...expenses].sort((a, b) => b.ts - a.ts);
+    const taggedExpenses = expenses.map((x) => ({ ...x, kind: "expense" }));
+    const taggedIncomes = incomes.map((x) => ({ ...x, kind: "income" }));
+    const sorted = [...taggedExpenses, ...taggedIncomes].sort((a, b) => b.ts - a.ts);
     const groups = [];
     let lastLabel = null;
     sorted.forEach((x) => {
@@ -120,7 +161,7 @@ export default function Home() {
       groups[groups.length - 1].items.push(x);
     });
     return groups;
-  }, [expenses]);
+  }, [expenses, incomes]);
 
   function detectLocalCategory(text) {
     // Mirrors lib/categories.js logic client-side for instant preview.
@@ -159,10 +200,30 @@ export default function Home() {
   async function handleSubmit(e) {
     e.preventDefault();
     const numAmount = parseFloat(amount);
-    if (!numAmount || numAmount <= 0 || !reason.trim()) return;
+    if (!numAmount || numAmount <= 0) return;
+    if (mode === "expense" && !reason.trim()) return;
 
     setSubmitting(true);
     try {
+      if (mode === "income") {
+        const res = await fetch("/api/incomes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ amount: numAmount, source: reason.trim() || "Income" }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          setIncomes((prev) => [data.income, ...prev]);
+          setAmount("");
+          setReason("");
+          setJustAdded(true);
+          setCoinFace("happy");
+          setTimeout(() => setJustAdded(false), 900);
+          setTimeout(() => setCoinFace("idle"), 1400);
+        }
+        return;
+      }
+
       const res = await fetch("/api/expenses", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -170,15 +231,42 @@ export default function Home() {
       });
       const data = await res.json();
       if (res.ok) {
-        setExpenses((prev) => [data.expense, ...prev]);
+        const newExpense = data.expense;
+        const updatedExpenses = [newExpense, ...expenses];
+        setExpenses(updatedExpenses);
         setAmount("");
         setReason("");
         setCategory("other");
         setAutoCategory(true);
         setJustAdded(true);
-        setCoinFace("happy");
+
+        // ---- check limits with the freshly updated totals ----
+        const now = new Date();
+        const dayStart = startOfDay(now);
+        let newTodaySum = 0;
+        let newMonthSum = 0;
+        updatedExpenses.forEach((x) => {
+          const d = new Date(x.ts);
+          if (d >= dayStart) newTodaySum += x.amount;
+          if (sameMonth(d, now)) newMonthSum += x.amount;
+        });
+
+        const dailyOver = dailyLimit && newTodaySum > dailyLimit;
+        const monthlyOver = monthlyLimit && newMonthSum > monthlyLimit;
+        const dailyWarn = dailyLimit && !dailyOver && newTodaySum >= dailyLimit * 0.8;
+        const monthlyWarn = monthlyLimit && !monthlyOver && newMonthSum >= monthlyLimit * 0.8;
+
+        if (dailyOver || monthlyOver) {
+          setCoinFace("busted");
+          setBustedType(dailyOver ? "daily" : "monthly");
+        } else {
+          setCoinFace("happy");
+          setTimeout(() => setCoinFace("idle"), 1400);
+        }
+        setWarnedDaily(Boolean(dailyWarn || dailyOver));
+        setWarnedMonthly(Boolean(monthlyWarn || monthlyOver));
+
         setTimeout(() => setJustAdded(false), 900);
-        setTimeout(() => setCoinFace("idle"), 1400);
       }
     } catch {
       // silently fail, keep their input so they can retry
@@ -187,7 +275,16 @@ export default function Home() {
     }
   }
 
-  async function handleDelete(id) {
+  async function handleDelete(id, kind) {
+    if (kind === "income") {
+      setIncomes((prev) => prev.filter((x) => x.id !== id));
+      try {
+        await fetch(`/api/incomes/${id}`, { method: "DELETE" });
+      } catch {
+        // best-effort; a refresh will resync
+      }
+      return;
+    }
     setExpenses((prev) => prev.filter((x) => x.id !== id));
     try {
       await fetch(`/api/expenses/${id}`, { method: "DELETE" });
@@ -196,10 +293,34 @@ export default function Home() {
     }
   }
 
+  async function handleSaveLimits({ dailyLimit: dl, monthlyLimit: ml }) {
+    try {
+      const res = await fetch("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dailyLimit: dl, monthlyLimit: ml }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setDailyLimit(data.dailyLimit);
+        setMonthlyLimit(data.monthlyLimit);
+        setWarnedDaily(false);
+        setWarnedMonthly(false);
+      }
+    } catch {
+      // best effort
+    } finally {
+      setShowLimitsModal(false);
+    }
+  }
+
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST" });
     setUser(null);
     setExpenses([]);
+    setIncomes([]);
+    setDailyLimit(null);
+    setMonthlyLimit(null);
   }
 
   if (user === undefined) {
@@ -268,15 +389,42 @@ export default function Home() {
               <CoinMascot expression={coinFace} size={40} className={justAdded ? "coin-spin" : "coin-bob"} />
             </div>
           </div>
-          <div className="mono font-semibold mt-6" style={{ fontSize: 42, letterSpacing: "-.01em" }}>
-            {formatMoney(stats.monthSum)}
+
+          <div className="flex items-end justify-between mt-6">
+            <div>
+              <div className="mono font-semibold" style={{ fontSize: 42, letterSpacing: "-.01em" }}>
+                {formatMoney(stats.monthSum)}
+              </div>
+              <div
+                className="uppercase mt-0.5"
+                style={{ fontSize: 11.5, letterSpacing: ".12em", color: "rgba(244,239,227,.5)" }}
+              >
+                spent this month
+              </div>
+            </div>
+            <div className="text-right pb-1">
+              <div
+                className="mono font-semibold"
+                style={{ fontSize: 18, color: stats.balance < 0 ? "#E08A6E" : "var(--mint)" }}
+              >
+                {formatMoney(stats.balance)}
+              </div>
+              <div
+                className="uppercase mt-0.5"
+                style={{ fontSize: 9.5, letterSpacing: ".1em", color: "rgba(244,239,227,.45)" }}
+              >
+                balance
+              </div>
+            </div>
           </div>
-          <div
-            className="uppercase mt-0.5"
-            style={{ fontSize: 11.5, letterSpacing: ".12em", color: "rgba(244,239,227,.5)" }}
+
+          <button
+            onClick={() => setShowLimitsModal(true)}
+            className="absolute top-2 right-14 text-[10px] px-2 py-1"
+            style={{ color: "rgba(244,239,227,.4)" }}
           >
-            spent this month
-          </div>
+            limits
+          </button>
           <button
             onClick={handleLogout}
             className="absolute top-2 right-2 text-[10px] px-2 py-1"
@@ -299,6 +447,39 @@ export default function Home() {
             border: "1px solid var(--paper-line)",
           }}
         >
+          <div className="flex gap-1.5 mb-4" style={{ background: "var(--cream)", borderRadius: 10, padding: 3 }}>
+            <button
+              type="button"
+              onClick={() => setMode("expense")}
+              className="flex-1 font-bold rounded-[8px]"
+              style={{
+                padding: "8px 0",
+                fontSize: 12.5,
+                letterSpacing: ".02em",
+                background: mode === "expense" ? "var(--copper)" : "transparent",
+                color: mode === "expense" ? "var(--cream)" : "var(--muted)",
+                transition: "all .15s",
+              }}
+            >
+              Expense
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode("income")}
+              className="flex-1 font-bold rounded-[8px]"
+              style={{
+                padding: "8px 0",
+                fontSize: 12.5,
+                letterSpacing: ".02em",
+                background: mode === "income" ? "var(--mint)" : "transparent",
+                color: mode === "income" ? "var(--navy)" : "var(--muted)",
+                transition: "all .15s",
+              }}
+            >
+              Income
+            </button>
+          </div>
+
           <div className="flex gap-3.5 items-end relative">
             <div className="flex-1">
               <label
@@ -320,22 +501,24 @@ export default function Home() {
                 style={{ borderBottom: "1.5px solid var(--paper-line)", fontSize: 22, color: "var(--ink)" }}
               />
             </div>
-            <div
-              className="relative flex-shrink-0 rounded-full flex items-center justify-center mono font-bold"
-              style={{
-                width: 48,
-                height: 48,
-                border: `2px dashed ${c.color}`,
-                color: c.color,
-                fontSize: 8.5,
-                letterSpacing: ".03em",
-                transform: "rotate(-6deg)",
-                transition: "border-color .15s,color .15s",
-              }}
-            >
-              {c.code}
-              {justAdded && <SparkleBurst count={6} />}
-            </div>
+            {mode === "expense" && (
+              <div
+                className="relative flex-shrink-0 rounded-full flex items-center justify-center mono font-bold"
+                style={{
+                  width: 48,
+                  height: 48,
+                  border: `2px dashed ${c.color}`,
+                  color: c.color,
+                  fontSize: 8.5,
+                  letterSpacing: ".03em",
+                  transform: "rotate(-6deg)",
+                  transition: "border-color .15s,color .15s",
+                }}
+              >
+                {c.code}
+                {justAdded && <SparkleBurst count={6} />}
+              </div>
+            )}
           </div>
 
           <div className="mt-3.5">
@@ -343,13 +526,13 @@ export default function Home() {
               className="block uppercase tracking-wider mb-1.5"
               style={{ fontSize: 10.5, color: "var(--muted)", letterSpacing: ".1em" }}
             >
-              What was it for?
+              {mode === "expense" ? "What was it for?" : "Where's it from?"}
             </label>
             <input
               type="text"
               maxLength={80}
-              placeholder="e.g. Swiggy dinner, Ola ride"
-              required
+              placeholder={mode === "expense" ? "e.g. Swiggy dinner, Ola ride" : "e.g. Salary, freelance gig"}
+              required={mode === "expense"}
               value={reason}
               onChange={(e) => handleReasonChange(e.target.value)}
               className="w-full bg-transparent outline-none py-2"
@@ -357,36 +540,75 @@ export default function Home() {
             />
           </div>
 
-          <div className="mt-3.5">
-            <label
-              className="block uppercase tracking-wider mb-1.5"
-              style={{ fontSize: 10.5, color: "var(--muted)", letterSpacing: ".1em" }}
-            >
-              Category
-            </label>
-            <select
-              value={category}
-              onChange={(e) => handleCategoryChange(e.target.value)}
-              className="w-full bg-transparent outline-none py-2"
-              style={{ borderBottom: "1.5px solid var(--paper-line)", fontSize: 16, color: "var(--ink)" }}
-            >
-              {Object.keys(CATEGORIES).map((key) => (
-                <option key={key} value={key}>
-                  {CATEGORIES[key].label}
-                </option>
-              ))}
-            </select>
-          </div>
+          {mode === "expense" && (
+            <div className="mt-3.5">
+              <label
+                className="block uppercase tracking-wider mb-1.5"
+                style={{ fontSize: 10.5, color: "var(--muted)", letterSpacing: ".1em" }}
+              >
+                Category
+              </label>
+              <select
+                value={category}
+                onChange={(e) => handleCategoryChange(e.target.value)}
+                className="w-full bg-transparent outline-none py-2"
+                style={{ borderBottom: "1.5px solid var(--paper-line)", fontSize: 16, color: "var(--ink)" }}
+              >
+                {Object.keys(CATEGORIES).map((key) => (
+                  <option key={key} value={key}>
+                    {CATEGORIES[key].label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <button
             type="submit"
             disabled={submitting}
             className="mt-4 w-full font-bold rounded-[11px] disabled:opacity-60"
-            style={{ background: "var(--copper)", color: "var(--cream)", padding: "13px", fontSize: 15, letterSpacing: ".02em" }}
+            style={{
+              background: mode === "expense" ? "var(--copper)" : "var(--mint)",
+              color: mode === "expense" ? "var(--cream)" : "var(--navy)",
+              padding: "13px",
+              fontSize: 15,
+              letterSpacing: ".02em",
+            }}
           >
-            {submitting ? "Adding…" : "Add to ledger"}
+            {submitting ? "Adding…" : mode === "expense" ? "Add to ledger" : "Add income"}
           </button>
         </form>
+
+        {/* ---- Limits progress ---- */}
+        {(dailyLimit || monthlyLimit) && (
+          <div className="px-4 pt-[26px]">
+            <div className="uppercase tracking-wider mb-3 ml-0.5" style={{ fontSize: 11.5, color: "var(--muted)", letterSpacing: ".12em" }}>
+              Your limits
+            </div>
+            <div
+              className="rounded-[18px] p-4"
+              style={{ border: "1px solid var(--paper-line)" }}
+            >
+              {dailyLimit && (
+                <LimitBar
+                  label="Today"
+                  spent={stats.todaySum}
+                  limit={dailyLimit}
+                  pct={stats.dailyPct}
+                />
+              )}
+              {dailyLimit && monthlyLimit && <div className="h-3.5" />}
+              {monthlyLimit && (
+                <LimitBar
+                  label="This month"
+                  spent={stats.monthSum}
+                  limit={monthlyLimit}
+                  pct={stats.monthlyPct}
+                />
+              )}
+            </div>
+          </div>
+        )}
 
         {/* ---- Overview stats ---- */}
         <div className="px-4 pt-[26px]">
@@ -422,7 +644,7 @@ export default function Home() {
             Recent entries
           </div>
           <div className="rounded-[18px] overflow-hidden" style={{ background: "var(--paper)", border: "1px solid var(--paper-line)" }}>
-            {loadingExpenses ? (
+            {loadingData ? (
               <div className="text-center py-9 px-5" style={{ color: "var(--muted)", fontSize: 13.5 }}>
                 Loading your ledger…
               </div>
@@ -442,11 +664,12 @@ export default function Home() {
                     {group.label}
                   </div>
                   {group.items.map((x, idx) => {
-                    const cat = CATEGORIES[x.category] || CATEGORIES.other;
+                    const isIncome = x.kind === "income";
+                    const cat = isIncome ? null : CATEGORIES[x.category] || CATEGORIES.other;
                     const d = new Date(x.ts);
                     return (
                       <div
-                        key={x.id}
+                        key={`${x.kind}-${x.id}`}
                         className={`flex items-center gap-3 relative ${idx === 0 ? "row-in" : ""}`}
                         style={{
                           padding: "11px 14px 11px 16px",
@@ -459,28 +682,33 @@ export default function Home() {
                           style={{
                             width: 38,
                             height: 38,
-                            fontSize: 7,
+                            fontSize: isIncome ? 16 : 7,
                             letterSpacing: ".02em",
-                            border: `1.5px dashed ${cat.color}`,
-                            color: cat.color,
+                            border: `1.5px dashed ${isIncome ? "var(--mint)" : cat.color}`,
+                            color: isIncome ? "var(--mint)" : cat.color,
                             transform: "rotate(-5deg)",
                           }}
                         >
-                          {cat.code}
+                          {isIncome ? "+" : cat.code}
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="font-medium truncate" style={{ fontSize: 14 }}>
-                            {x.reason}
+                            {isIncome ? x.source : x.reason}
                           </div>
                           <div className="mt-0.5" style={{ fontSize: 11, color: "var(--muted)" }}>
-                            {cat.label} &middot; {d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+                            {isIncome ? "Income" : cat.label} &middot;{" "}
+                            {d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
                           </div>
                         </div>
-                        <div className="mono font-semibold whitespace-nowrap" style={{ fontSize: 14.5, color: "var(--rust)" }}>
+                        <div
+                          className="mono font-semibold whitespace-nowrap"
+                          style={{ fontSize: 14.5, color: isIncome ? "var(--mint)" : "var(--rust)" }}
+                        >
+                          {isIncome ? "+" : ""}
                           {formatMoney(x.amount)}
                         </div>
                         <button
-                          onClick={() => handleDelete(x.id)}
+                          onClick={() => handleDelete(x.id, x.kind)}
                           aria-label="Delete entry"
                           className="leading-none"
                           style={{ background: "none", border: "none", color: "var(--muted)", fontSize: 16, padding: "4px 2px 4px 8px", cursor: "pointer" }}
@@ -501,6 +729,19 @@ export default function Home() {
           open Tuppence on any device and they&apos;ll be right here.
         </p>
       </div>
+
+      {showLimitsModal && (
+        <LimitsModal
+          dailyLimit={dailyLimit}
+          monthlyLimit={monthlyLimit}
+          onSave={handleSaveLimits}
+          onClose={() => setShowLimitsModal(false)}
+        />
+      )}
+
+      {bustedType && (
+        <BustedBanner type={bustedType} onDismiss={() => setBustedType(null)} />
+      )}
     </>
   );
 }
@@ -517,6 +758,40 @@ function Stat({ label, value, border }) {
       <div className="uppercase tracking-wider mt-0.5" style={{ fontSize: 10, color: "var(--muted)", letterSpacing: ".08em" }}>
         {label}
       </div>
+    </div>
+  );
+}
+
+function LimitBar({ label, spent, limit, pct }) {
+  const clamped = Math.min(pct, 100);
+  const over = pct >= 100;
+  const warn = !over && pct >= 80;
+  const barColor = over ? "var(--rust)" : warn ? "var(--gold)" : "var(--mint)";
+
+  return (
+    <div>
+      <div className="flex items-baseline justify-between mb-1.5">
+        <span style={{ fontSize: 12.5, color: "var(--ink)", fontWeight: 500 }}>{label}</span>
+        <span className="mono" style={{ fontSize: 11.5, color: "var(--muted)" }}>
+          {formatMoney(spent)} / {formatMoney(limit)}
+        </span>
+      </div>
+      <div className="rounded-full overflow-hidden" style={{ height: 8, background: "var(--paper-line)" }}>
+        <div
+          className="h-full rounded-full transition-all duration-300"
+          style={{ width: `${clamped}%`, background: barColor }}
+        />
+      </div>
+      {over && (
+        <div className="mt-1" style={{ fontSize: 11, color: "var(--rust)", fontWeight: 600 }}>
+          Over by {formatMoney(spent - limit)}
+        </div>
+      )}
+      {warn && (
+        <div className="mt-1" style={{ fontSize: 11, color: "var(--gold)", fontWeight: 600 }}>
+          Getting close — {Math.round(pct)}% used
+        </div>
+      )}
     </div>
   );
 }
