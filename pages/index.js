@@ -344,8 +344,6 @@ export default function Home() {
       if (res.ok) {
         setDailyLimit(data.dailyLimit);
         setMonthlyLimit(data.monthlyLimit);
-        setWarnedDaily(false);
-        setWarnedMonthly(false);
       }
     } catch {
       // best effort
