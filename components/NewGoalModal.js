@@ -1,24 +1,24 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 
-export default function LimitsModal({ dailyLimit, monthlyLimit, roastMode, onSave, onClose }) {
-  const [daily, setDaily] = useState(dailyLimit != null ? String(dailyLimit) : "");
-  const [monthly, setMonthly] = useState(monthlyLimit != null ? String(monthlyLimit) : "");
-  const [roast, setRoast] = useState(Boolean(roastMode));
+export default function NewGoalModal({ onSave, onClose }) {
+  const [title, setTitle] = useState("");
+  const [targetAmount, setTargetAmount] = useState("");
   const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    setDaily(dailyLimit != null ? String(dailyLimit) : "");
-    setMonthly(monthlyLimit != null ? String(monthlyLimit) : "");
-    setRoast(Boolean(roastMode));
-  }, [dailyLimit, monthlyLimit, roastMode]);
+  const [error, setError] = useState("");
 
   async function handleSave() {
+    setError("");
+    if (!title.trim()) {
+      setError("Give your goal a name.");
+      return;
+    }
+    const num = Number(targetAmount);
+    if (!num || num <= 0) {
+      setError("Enter a valid target amount.");
+      return;
+    }
     setSaving(true);
-    await onSave({
-      dailyLimit: daily === "" ? null : Number(daily),
-      monthlyLimit: monthly === "" ? null : Number(monthly),
-      roastMode: roast,
-    });
+    await onSave({ title: title.trim(), targetAmount: num });
     setSaving(false);
   }
 
@@ -43,10 +43,10 @@ export default function LimitsModal({ dailyLimit, monthlyLimit, roastMode, onSav
           className="uppercase font-bold mb-1"
           style={{ color: "var(--copper)", fontSize: 16, letterSpacing: ".06em" }}
         >
-          Set your limits
+          New savings goal
         </div>
         <p className="mb-5" style={{ fontSize: 12.5, color: "var(--muted)", lineHeight: 1.5 }}>
-          Leave blank for no limit. Tup will let you know if you go over.
+          What are you saving up for?
         </p>
 
         <div className="mb-4">
@@ -54,16 +54,14 @@ export default function LimitsModal({ dailyLimit, monthlyLimit, roastMode, onSav
             className="block uppercase tracking-wider mb-1.5"
             style={{ fontSize: 10.5, color: "var(--muted)", letterSpacing: ".1em" }}
           >
-            Daily limit
+            Goal name
           </label>
           <input
-            type="number"
-            inputMode="decimal"
-            min="0"
-            step="0.01"
-            placeholder="No limit set"
-            value={daily}
-            onChange={(e) => setDaily(e.target.value)}
+            type="text"
+            maxLength={80}
+            placeholder="e.g. New laptop"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
             className="w-full bg-transparent outline-none py-2"
             style={{ borderBottom: "1.5px solid var(--paper-line)", fontSize: 16, color: "var(--ink)" }}
           />
@@ -74,57 +72,26 @@ export default function LimitsModal({ dailyLimit, monthlyLimit, roastMode, onSav
             className="block uppercase tracking-wider mb-1.5"
             style={{ fontSize: 10.5, color: "var(--muted)", letterSpacing: ".1em" }}
           >
-            Monthly limit
+            Target amount
           </label>
           <input
             type="number"
             inputMode="decimal"
-            min="0"
+            min="1"
             step="0.01"
-            placeholder="No limit set"
-            value={monthly}
-            onChange={(e) => setMonthly(e.target.value)}
+            placeholder="80000"
+            value={targetAmount}
+            onChange={(e) => setTargetAmount(e.target.value)}
             className="w-full bg-transparent outline-none py-2"
             style={{ borderBottom: "1.5px solid var(--paper-line)", fontSize: 16, color: "var(--ink)" }}
           />
         </div>
 
-        <div
-          className="flex items-center justify-between mb-5 rounded-[12px] p-3"
-          style={{ background: "var(--cream)" }}
-        >
-          <div>
-            <div className="font-semibold" style={{ fontSize: 13.5 }}>
-              Roast mode 🔥
-            </div>
-            <div style={{ fontSize: 11.5, color: "var(--muted)", lineHeight: 1.4, maxWidth: 200 }}>
-              Tup gets a lot more sarcastic when you overspend.
-            </div>
+        {error && (
+          <div className="mb-3 text-sm" style={{ color: "var(--rust)" }}>
+            {error}
           </div>
-          <button
-            onClick={() => setRoast((r) => !r)}
-            role="switch"
-            aria-checked={roast}
-            className="flex-shrink-0 rounded-full relative"
-            style={{
-              width: 44,
-              height: 26,
-              background: roast ? "var(--copper)" : "var(--paper-line)",
-              transition: "background .15s",
-            }}
-          >
-            <span
-              className="absolute rounded-full bg-white"
-              style={{
-                width: 20,
-                height: 20,
-                top: 3,
-                left: roast ? 21 : 3,
-                transition: "left .15s",
-              }}
-            />
-          </button>
-        </div>
+        )}
 
         <div className="flex gap-2.5">
           <button
@@ -140,7 +107,7 @@ export default function LimitsModal({ dailyLimit, monthlyLimit, roastMode, onSav
             className="flex-1 font-bold rounded-[10px] disabled:opacity-60"
             style={{ background: "var(--copper)", color: "var(--cream)", padding: "11px", fontSize: 13.5 }}
           >
-            {saving ? "Saving…" : "Save"}
+            {saving ? "Creating…" : "Create goal"}
           </button>
         </div>
       </div>
