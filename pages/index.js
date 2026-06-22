@@ -9,9 +9,21 @@ import BustedBanner from "@/components/BustedBanner";
 import MilestoneBanner from "@/components/MilestoneBanner";
 import LimitsModal from "@/components/LimitsModal";
 import SwipeToDelete from "@/components/SwipeToDelete";
+import HealthScoreCard from "@/components/HealthScoreCard";
+import GoalsSection from "@/components/GoalsSection";
+import NewGoalModal from "@/components/NewGoalModal";
+import AddToGoalModal from "@/components/AddToGoalModal";
+import GoalCompleteBanner from "@/components/GoalCompleteBanner";
 import { CATEGORIES } from "@/lib/categories";
 import { formatMoney } from "@/lib/format";
-import { computeStreak, generateRecap, detectNewMilestones } from "@/lib/insights";
+import {
+  computeStreak,
+  generateRecap,
+  detectNewMilestones,
+  computeMood,
+  computeHealthScore,
+  countActiveDaysLast7,
+} from "@/lib/insights";
 
 function startOfDay(d) {
   const x = new Date(d);
@@ -69,6 +81,7 @@ export default function Home() {
 
   const [dailyLimit, setDailyLimit] = useState(null);
   const [monthlyLimit, setMonthlyLimit] = useState(null);
+  const [roastMode, setRoastMode] = useState(false);
   const [showLimitsModal, setShowLimitsModal] = useState(false);
   const [bustedType, setBustedType] = useState(null); // null | "daily" | "monthly"
   const [overDaily, setOverDaily] = useState(false); // true once today's limit is crossed
@@ -76,6 +89,16 @@ export default function Home() {
 
   const [seenMilestones, setSeenMilestones] = useState([]);
   const [activeMilestone, setActiveMilestone] = useState(null);
+
+  const [goals, setGoals] = useState([]);
+  const [showNewGoalModal, setShowNewGoalModal] = useState(false);
+  const [selectedGoal, setSelectedGoal] = useState(null);
+  const [completedGoal, setCompletedGoal] = useState(null);
+
+  // ---- transient signal for "payday" mood: true right after an income add,
+  // cleared a few seconds later so the mood doesn't stay stuck on "payday" ----
+  const [justAddedIncomeFlag, setJustAddedIncomeFlag] = useState(false);
+  const [lastExpenseAmount, setLastExpenseAmount] = useState(0);
 
   // ---- has the "Busted" popup already been shown for this period? ----
   function bustedShownKey(username, period, key) {
@@ -106,7 +129,7 @@ export default function Home() {
       .catch(() => setUser(null));
   }, []);
 
-  // ---- load expenses + incomes + settings + milestones once logged in ----
+  // ---- load expenses + incomes + settings + milestones + goals once logged in ----
   useEffect(() => {
     if (!user) return;
     setLoadingData(true);
@@ -115,13 +138,16 @@ export default function Home() {
       fetch("/api/incomes").then((r) => r.json()),
       fetch("/api/settings").then((r) => r.json()),
       fetch("/api/milestones").then((r) => r.json()),
+      fetch("/api/goals").then((r) => r.json()),
     ])
-      .then(([expData, incData, setData, milestoneData]) => {
+      .then(([expData, incData, setData, milestoneData, goalsData]) => {
         setExpenses(expData.expenses || []);
         setIncomes(incData.incomes || []);
         setDailyLimit(setData.dailyLimit ?? null);
         setMonthlyLimit(setData.monthlyLimit ?? null);
+        setRoastMode(Boolean(setData.roastMode));
         setSeenMilestones(milestoneData.seen || []);
+        setGoals(goalsData.goals || []);
       })
       .catch(() => {
         setExpenses([]);
@@ -178,6 +204,30 @@ export default function Home() {
     const streak = computeStreak(expenses, now);
     const recap = generateRecap({ todaySum, weekSum, lastWeekSum, monthByCat, monthSum });
 
+    const mood = computeMood(
+      {
+        balance,
+        isOverLimit: Boolean((dailyLimit && todaySum > dailyLimit) || (monthlyLimit && monthSum > monthlyLimit)),
+        justAddedIncome: justAddedIncomeFlag,
+        lastExpenseAmount,
+        monthlyLimit,
+        monthSum,
+      },
+      roastMode
+    );
+
+    const last7DaysLoggedCount = countActiveDaysLast7(
+      [...expenses, ...incomes].map((x) => ({ ts: x.ts })),
+      now
+    );
+    const healthScore = computeHealthScore({
+      monthSum,
+      monthlyLimit,
+      totalIncome,
+      totalExpense,
+      last7DaysLoggedCount,
+    });
+
     return {
       todaySum,
       weekSum,
@@ -190,8 +240,10 @@ export default function Home() {
       monthlyPct,
       streak,
       recap,
+      mood,
+      healthScore,
     };
-  }, [expenses, incomes, dailyLimit, monthlyLimit]);
+  }, [expenses, incomes, dailyLimit, monthlyLimit, roastMode, justAddedIncomeFlag, lastExpenseAmount]);
 
   // ---- keep the persistent over-limit badges in sync (covers page refresh too) ----
   useEffect(() => {
@@ -288,8 +340,10 @@ export default function Home() {
           setReason("");
           setJustAdded(true);
           setCoinFace("happy");
+          setJustAddedIncomeFlag(true);
           setTimeout(() => setJustAdded(false), 900);
           setTimeout(() => setCoinFace("idle"), 1400);
+          setTimeout(() => setJustAddedIncomeFlag(false), 6000);
         }
         return;
       }
@@ -309,6 +363,8 @@ export default function Home() {
         setCategory("other");
         setAutoCategory(true);
         setJustAdded(true);
+        setLastExpenseAmount(numAmount);
+        setTimeout(() => setLastExpenseAmount(0), 8000);
 
         // ---- check limits with the freshly updated totals ----
         const now = new Date();
@@ -366,22 +422,75 @@ export default function Home() {
     }
   }
 
-  async function handleSaveLimits({ dailyLimit: dl, monthlyLimit: ml }) {
+  async function handleSaveLimits({ dailyLimit: dl, monthlyLimit: ml, roastMode: rm }) {
     try {
       const res = await fetch("/api/settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dailyLimit: dl, monthlyLimit: ml }),
+        body: JSON.stringify({ dailyLimit: dl, monthlyLimit: ml, roastMode: rm }),
       });
       const data = await res.json();
       if (res.ok) {
         setDailyLimit(data.dailyLimit);
         setMonthlyLimit(data.monthlyLimit);
+        setRoastMode(Boolean(data.roastMode));
       }
     } catch {
       // best effort
     } finally {
       setShowLimitsModal(false);
+    }
+  }
+
+  async function handleCreateGoal({ title, targetAmount }) {
+    try {
+      const res = await fetch("/api/goals", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title, targetAmount }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setGoals((prev) => [data.goal, ...prev]);
+      }
+    } catch {
+      // best effort
+    } finally {
+      setShowNewGoalModal(false);
+    }
+  }
+
+  async function handleAddToGoal(addAmount) {
+    if (!selectedGoal) return;
+    try {
+      const res = await fetch(`/api/goals/${selectedGoal.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ addAmount }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setGoals((prev) => prev.map((g) => (g.id === data.goal.id ? data.goal : g)));
+        if (data.justCompleted) {
+          setCompletedGoal(data.goal);
+        }
+      }
+    } catch {
+      // best effort
+    } finally {
+      setSelectedGoal(null);
+    }
+  }
+
+  async function handleDeleteGoal() {
+    if (!selectedGoal) return;
+    const id = selectedGoal.id;
+    setGoals((prev) => prev.filter((g) => g.id !== id));
+    setSelectedGoal(null);
+    try {
+      await fetch(`/api/goals/${id}`, { method: "DELETE" });
+    } catch {
+      // best-effort; a refresh will resync
     }
   }
 
@@ -392,6 +501,8 @@ export default function Home() {
     setIncomes([]);
     setDailyLimit(null);
     setMonthlyLimit(null);
+    setRoastMode(false);
+    setGoals([]);
   }
 
   if (user === undefined) {
@@ -458,7 +569,7 @@ export default function Home() {
             </div>
             <div className="flex items-center gap-2.5">
               <CoinMascot
-                expression={justAdded ? coinFace : (overDaily || overMonthly ? "worried" : "idle")}
+                expression={justAdded ? coinFace : stats.mood.face}
                 size={40}
                 className={justAdded ? "coin-spin" : "coin-bob"}
               />
@@ -476,7 +587,7 @@ export default function Home() {
               >
                 spent this month
               </div>
-              {stats.recap && (
+              {(stats.mood.line || stats.recap) && (
                 <div
                   className="mt-2 flex items-start gap-1.5"
                   style={{ maxWidth: 230 }}
@@ -486,7 +597,7 @@ export default function Home() {
                     className="text-xs"
                     style={{ color: "var(--gold)", lineHeight: 1.4, fontWeight: 500 }}
                   >
-                    {stats.recap}
+                    {stats.mood.line || stats.recap}
                   </span>
                 </div>
               )}
@@ -732,6 +843,18 @@ export default function Home() {
           </div>
         </div>
 
+        {/* ---- Health score ---- */}
+        <div className="px-4 pt-[26px]">
+          <HealthScoreCard score={stats.healthScore} />
+        </div>
+
+        {/* ---- Goals ---- */}
+        <GoalsSection
+          goals={goals}
+          onAddNew={() => setShowNewGoalModal(true)}
+          onSelectGoal={(g) => setSelectedGoal(g)}
+        />
+
         {/* ---- Donut ---- */}
         <div className="px-4 pt-[26px]">
           <div className="uppercase tracking-wider mb-3 ml-0.5" style={{ fontSize: 11.5, color: "var(--muted)", letterSpacing: ".12em" }}>
@@ -840,6 +963,7 @@ export default function Home() {
         <LimitsModal
           dailyLimit={dailyLimit}
           monthlyLimit={monthlyLimit}
+          roastMode={roastMode}
           onSave={handleSaveLimits}
           onClose={() => setShowLimitsModal(false)}
         />
@@ -847,6 +971,23 @@ export default function Home() {
 
       {bustedType && (
         <BustedBanner type={bustedType} onDismiss={() => setBustedType(null)} />
+      )}
+
+      {showNewGoalModal && (
+        <NewGoalModal onSave={handleCreateGoal} onClose={() => setShowNewGoalModal(false)} />
+      )}
+
+      {selectedGoal && (
+        <AddToGoalModal
+          goal={selectedGoal}
+          onSave={handleAddToGoal}
+          onClose={() => setSelectedGoal(null)}
+          onDeleteGoal={handleDeleteGoal}
+        />
+      )}
+
+      {completedGoal && (
+        <GoalCompleteBanner goal={completedGoal} onDismiss={() => setCompletedGoal(null)} />
       )}
 
       {!bustedType && activeMilestone && (
