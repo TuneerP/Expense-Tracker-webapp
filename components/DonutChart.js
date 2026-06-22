@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { CATEGORIES } from "@/lib/categories";
 import { formatMoney } from "@/lib/format";
+import WatercolorBackdrop from "./WatercolorBackdrop";
 
 // Lightens a category's own hex color into a soft pastel tint for its icon
 // badge, so each category's badge is visually tied to its real color rather
@@ -60,54 +61,54 @@ export default function DonutChart({ monthByCat, monthSum }) {
   return (
     <div
       ref={sectionRef}
-      className="rounded-[20px] p-5"
-      style={{
-        background: "linear-gradient(160deg, #f3ead9 0%, #e9dcc4 55%, #ddd0b3 100%)",
-        border: "1px solid rgba(255,255,255,.4)",
-      }}
+      className="relative overflow-hidden rounded-[20px]"
+      style={{ minHeight: 430 }}
     >
-      <div className="relative mx-auto" style={{ width: 156, height: 156, margin: "4px auto 20px" }}>
-        <div
-          className="w-full h-full rounded-full"
-          style={{
-            background,
-            boxShadow: "0 6px 20px rgba(140,110,70,.18)",
-            transform: animated ? "scale(1) rotate(0deg)" : "scale(0.4) rotate(-110deg)",
-            opacity: animated ? 1 : 0,
-            transition: "transform 0.7s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.5s ease",
-          }}
-        />
-        <div
-          className="absolute flex flex-col items-center justify-center rounded-full"
-          style={{
-            top: 16,
-            left: 16,
-            right: 16,
-            bottom: 16,
-            background: "#fff",
-            opacity: animated ? 1 : 0,
-            transition: "opacity 0.4s ease 0.3s",
-          }}
-        >
-          <div className="mono font-semibold" style={{ fontSize: 17, color: "var(--ink)" }}>
-            {formatMoney(monthSum)}
-          </div>
-          <div className="uppercase tracking-wider mt-0.5" style={{ fontSize: 9, color: "var(--muted)", letterSpacing: ".08em" }}>
-            this month
-          </div>
-        </div>
-      </div>
+      <WatercolorBackdrop />
 
-      {entries.length === 0 ? (
-        <div
-          className="text-center py-8 px-5 rounded-[16px]"
-          style={{ background: "rgba(255,255,255,.7)", color: "var(--muted)", fontSize: 13.5 }}
-        >
-          No spending logged this month yet.
+      <div className="relative z-[1] p-5">
+        <div className="relative mx-auto" style={{ width: 156, height: 156, margin: "4px auto 22px" }}>
+          <div
+            className="w-full h-full rounded-full"
+            style={{
+              background,
+              boxShadow: "0 8px 24px rgba(20,15,5,.3)",
+              transform: animated ? "scale(1) rotate(0deg)" : "scale(0.4) rotate(-110deg)",
+              opacity: animated ? 1 : 0,
+              transition: "transform 0.7s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.5s ease",
+            }}
+          />
+          <div
+            className="absolute flex flex-col items-center justify-center rounded-full"
+            style={{
+              top: 16,
+              left: 16,
+              right: 16,
+              bottom: 16,
+              background: "#fff",
+              opacity: animated ? 1 : 0,
+              transition: "opacity 0.4s ease 0.3s",
+            }}
+          >
+            <div className="mono font-semibold" style={{ fontSize: 17, color: "var(--ink)" }}>
+              {formatMoney(monthSum)}
+            </div>
+            <div className="uppercase tracking-wider mt-0.5" style={{ fontSize: 9, color: "var(--muted)", letterSpacing: ".08em" }}>
+              this month
+            </div>
+          </div>
         </div>
-      ) : (
-        <div className="flex flex-col gap-2.5">
-          {entries.map((e, idx) => {
+
+        {entries.length === 0 ? (
+          <div
+            className="text-center py-8 px-5 rounded-[16px]"
+            style={{ background: "rgba(255,255,255,.9)", color: "var(--muted)", fontSize: 13.5 }}
+          >
+            No spending logged this month yet.
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2.5">
+            {entries.map((e, idx) => {
             const c = CATEGORIES[e.key];
             const pct = (e.amt / monthSum) * 100;
             const delay = 0.15 + idx * 0.08;
@@ -117,7 +118,7 @@ export default function DonutChart({ monthByCat, monthSum }) {
                 className="flex items-center gap-3 rounded-[16px] p-3"
                 style={{
                   background: "#fff",
-                  boxShadow: "0 4px 14px rgba(140,110,70,.1)",
+                  boxShadow: "0 6px 18px rgba(10,8,4,.22)",
                   opacity: animated ? 1 : 0,
                   transform: animated ? "translateY(0)" : "translateY(14px)",
                   transition: `opacity 0.4s ease ${delay}s, transform 0.4s ease ${delay}s`,
@@ -164,6 +165,7 @@ export default function DonutChart({ monthByCat, monthSum }) {
           })}
         </div>
       )}
+      </div>
     </div>
   );
 }
