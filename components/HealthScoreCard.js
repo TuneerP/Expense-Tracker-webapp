@@ -57,17 +57,28 @@ export default function HealthScoreCard({ score }) {
           {score.breakdown.map((b) => (
             <div key={b.name} className="mb-2.5 last:mb-0">
               <div className="flex items-center justify-between mb-1">
-                <span style={{ fontSize: 12.5, color: "var(--ink)" }}>{b.name}</span>
+                <span style={{ fontSize: 12.5, color: b.missing ? "var(--muted)" : "var(--ink)" }}>
+                  {b.name}
+                </span>
                 <span className="mono" style={{ fontSize: 11.5, color: "var(--muted)" }}>
-                  {b.points}/{b.max}
+                  {b.missing ? "Not counted yet" : `${b.points}/${b.max}`}
                 </span>
               </div>
               <div className="rounded-full overflow-hidden" style={{ height: 6, background: "var(--paper-line)" }}>
-                <div
-                  className="h-full rounded-full"
-                  style={{ width: `${(b.points / b.max) * 100}%`, background: ringColor }}
-                />
+                {!b.missing && (
+                  <div
+                    className="h-full rounded-full"
+                    style={{ width: `${(b.points / b.max) * 100}%`, background: ringColor }}
+                  />
+                )}
               </div>
+              {b.missing && (
+                <div className="mt-1" style={{ fontSize: 10.5, color: "var(--muted)", lineHeight: 1.4 }}>
+                  {b.name === "Staying under budget"
+                    ? "Set a monthly limit to include this."
+                    : "Log a bit more income to include this."}
+                </div>
+              )}
             </div>
           ))}
         </div>
