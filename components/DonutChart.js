@@ -1,16 +1,45 @@
+import { useEffect, useRef, useState } from "react";
 import { CATEGORIES } from "@/lib/categories";
 import { formatMoney } from "@/lib/format";
 
-// A soft, abstract gradient wash per index, rotating through a small set —
-// evokes a watercolor-postcard feeling without using any photographic art
-// (which would need real licensed imagery we don't have rights to use).
-const WASHES = [
-  "linear-gradient(135deg, #fde8d3 0%, #f6d9c4 40%, #e8c4a8 100%)",
-  "linear-gradient(135deg, #d9e8f0 0%, #c9dde8 40%, #b8cdd9 100%)",
-  "linear-gradient(135deg, #e3ecd8 0%, #d3e0c4 40%, #c2d1ae 100%)",
-];
+// Lightens a category's own hex color into a soft pastel tint for its icon
+// badge, so each category's badge is visually tied to its real color rather
+// than rotating through an unrelated fixed palette.
+function pastelTint(hex, amount = 0.78) {
+  const h = hex.replace("#", "");
+  const r = parseInt(h.substring(0, 2), 16);
+  const g = parseInt(h.substring(2, 4), 16);
+  const b = parseInt(h.substring(4, 6), 16);
+  const mix = (c) => Math.round(c + (255 - c) * amount);
+  return `rgb(${mix(r)}, ${mix(g)}, ${mix(b)})`;
+}
 
 export default function DonutChart({ monthByCat, monthSum }) {
+  const [animated, setAnimated] = useState(false);
+  const sectionRef = useRef(null);
+
+  useEffect(() => {
+    // Trigger the draw-in animation once this section actually scrolls into
+    // view, rather than immediately on mount (which could fire off-screen
+    // before the person has scrolled down to see it).
+    const el = sectionRef.current;
+    if (!el || typeof IntersectionObserver === "undefined") {
+      setAnimated(true);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setAnimated(true);
+          observer.disconnect();
+        }
+      },
+      { threshold: 0.2 }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
   const entries = Object.keys(monthByCat)
     .map((k) => ({ key: k, amt: monthByCat[k] }))
     .sort((a, b) => b.amt - a.amt);
@@ -30,6 +59,7 @@ export default function DonutChart({ monthByCat, monthSum }) {
 
   return (
     <div
+      ref={sectionRef}
       className="rounded-[20px] p-5"
       style={{
         background: "linear-gradient(160deg, #f3ead9 0%, #e9dcc4 55%, #ddd0b3 100%)",
@@ -38,12 +68,26 @@ export default function DonutChart({ monthByCat, monthSum }) {
     >
       <div className="relative mx-auto" style={{ width: 156, height: 156, margin: "4px auto 20px" }}>
         <div
-          className="w-full h-full rounded-full transition-all duration-300"
-          style={{ background, boxShadow: "0 6px 20px rgba(140,110,70,.18)" }}
+          className="w-full h-full rounded-full"
+          style={{
+            background,
+            boxShadow: "0 6px 20px rgba(140,110,70,.18)",
+            transform: animated ? "scale(1) rotate(0deg)" : "scale(0.4) rotate(-110deg)",
+            opacity: animated ? 1 : 0,
+            transition: "transform 0.7s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.5s ease",
+          }}
         />
         <div
           className="absolute flex flex-col items-center justify-center rounded-full"
-          style={{ top: 16, left: 16, right: 16, bottom: 16, background: "#fff" }}
+          style={{
+            top: 16,
+            left: 16,
+            right: 16,
+            bottom: 16,
+            background: "#fff",
+            opacity: animated ? 1 : 0,
+            transition: "opacity 0.4s ease 0.3s",
+          }}
         >
           <div className="mono font-semibold" style={{ fontSize: 17, color: "var(--ink)" }}>
             {formatMoney(monthSum)}
@@ -66,6 +110,7 @@ export default function DonutChart({ monthByCat, monthSum }) {
           {entries.map((e, idx) => {
             const c = CATEGORIES[e.key];
             const pct = (e.amt / monthSum) * 100;
+            const delay = 0.15 + idx * 0.08;
             return (
               <div
                 key={e.key}
@@ -73,6 +118,9 @@ export default function DonutChart({ monthByCat, monthSum }) {
                 style={{
                   background: "#fff",
                   boxShadow: "0 4px 14px rgba(140,110,70,.1)",
+                  opacity: animated ? 1 : 0,
+                  transform: animated ? "translateY(0)" : "translateY(14px)",
+                  transition: `opacity 0.4s ease ${delay}s, transform 0.4s ease ${delay}s`,
                 }}
               >
                 <div
@@ -80,7 +128,7 @@ export default function DonutChart({ monthByCat, monthSum }) {
                   style={{
                     width: 38,
                     height: 38,
-                    background: WASHES[idx % WASHES.length],
+                    background: pastelTint(c.color),
                     fontSize: 17,
                   }}
                 >
@@ -98,8 +146,12 @@ export default function DonutChart({ monthByCat, monthSum }) {
                   <div className="flex items-center gap-2 mt-1.5">
                     <div className="flex-1 rounded-full overflow-hidden" style={{ height: 5, background: "#ECE4D4" }}>
                       <div
-                        className="h-full rounded-full transition-all duration-300"
-                        style={{ width: `${pct}%`, background: c.color }}
+                        className="h-full rounded-full"
+                        style={{
+                          width: animated ? `${pct}%` : "0%",
+                          background: c.color,
+                          transition: `width 0.6s ease ${delay + 0.1}s`,
+                        }}
                       />
                     </div>
                     <span className="mono flex-shrink-0" style={{ fontSize: 10.5, color: "var(--muted)", width: 28, textAlign: "right" }}>
