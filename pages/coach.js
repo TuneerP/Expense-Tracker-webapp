@@ -7,7 +7,7 @@ import FinancialClimbScene from "@/components/FinancialClimbScene";
 import SavingsTargetModal from "@/components/SavingsTargetModal";
 import { CATEGORIES } from "@/lib/categories";
 import { formatMoney } from "@/lib/format";
-import { computeCoachAnalysis, computeFinancialClimb } from "@/lib/insights";
+import { computeCoachAnalysis, computeFinancialClimb, suggestSpendingCut } from "@/lib/insights";
 
 const WEATHER_LABELS = {
   clear: { emoji: "☀️", text: "Clear skies" },
@@ -142,7 +142,14 @@ export default function Coach() {
       : rawAnalysis;
 
   const activeGoal = goals.find((g) => !g.completedAt);
-  const goalProgressPct = activeGoal ? Math.min(100, (activeGoal.savedAmount / activeGoal.targetAmount) * 100) : null;
+  // Prefer the explicitly-tracked Goal's progress if the user has actually
+  // put money into one. Otherwise, fall back to progress derived from real
+  // accumulated leftover against the savings target — never default to an
+  // arbitrary 0% just because the separate Goals feature happens to be empty.
+  const goalProgressPct =
+    activeGoal && activeGoal.savedAmount > 0
+      ? Math.min(100, (activeGoal.savedAmount / activeGoal.targetAmount) * 100)
+      : analysis.targetProgressPct ?? null;
 
   const climb = computeFinancialClimb({
     coachAnalysis: analysis,
@@ -299,6 +306,25 @@ export default function Coach() {
                     );
                   })}
                 </div>
+
+                {(() => {
+                  const cut = suggestSpendingCut(analysis.avgCategoryMonthly, analysis.avgMonthlyExpense);
+                  if (!cut) return null;
+                  const cutCat = CATEGORIES[cut.key] || CATEGORIES.other;
+                  return (
+                    <div
+                      className="mt-3 rounded-[14px] p-3.5 flex items-start gap-2.5"
+                      style={{ background: "linear-gradient(150deg, #FFF3E0 0%, #FCE3C4 100%)" }}
+                    >
+                      <span style={{ fontSize: 16 }}>💡</span>
+                      <p style={{ fontSize: 12.5, color: "#7A4A1F", lineHeight: 1.5 }}>
+                        <strong>{cutCat.label}</strong> is taking up {cut.sharePct}% of your spending — the
+                        single biggest share. If there&apos;s room to trim it, that&apos;s where it&apos;ll
+                        move the needle most.
+                      </p>
+                    </div>
+                  );
+                })()}
               </div>
             )}
 
