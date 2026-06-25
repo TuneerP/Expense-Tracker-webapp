@@ -1,6 +1,34 @@
 import { query, ensureSchema } from "../../lib/db";
 import { getSessionFromReq } from "../../lib/auth";
 
+// Each setting's DB column name, how to read it from a row, and how to
+// normalize an incoming value. Adding a new setting means adding one entry
+// here — the merge-safety logic below applies uniformly to all of them.
+const FIELD_DEFS = {
+  dailyLimit: {
+    column: "daily_limit",
+    fromRow: (v) => (v !== null && v !== undefined ? Number(v) : null),
+    normalize: (v) => (v === null || v === undefined || v === "" ? null : Math.max(0, Math.round(Number(v) * 100) / 100)),
+  },
+  monthlyLimit: {
+    column: "monthly_limit",
+    fromRow: (v) => (v !== null && v !== undefined ? Number(v) : null),
+    normalize: (v) => (v === null || v === undefined || v === "" ? null : Math.max(0, Math.round(Number(v) * 100) / 100)),
+  },
+  roastMode: {
+    column: "roast_mode",
+    fromRow: (v) => Boolean(v),
+    normalize: (v) => Boolean(v),
+  },
+  savingsTarget: {
+    column: "savings_target",
+    fromRow: (v) => (v !== null && v !== undefined ? Number(v) : null),
+    normalize: (v) => (v === null || v === undefined || v === "" ? null : Math.max(0, Math.round(Number(v) * 100) / 100)),
+  },
+};
+
+const ALL_COLUMNS = Object.values(FIELD_DEFS).map((f) => f.column);
+
 export default async function handler(req, res) {
   const session = getSessionFromReq(req);
   if (!session) {
@@ -12,65 +40,59 @@ export default async function handler(req, res) {
 
     if (req.method === "GET") {
       const result = await query(
-        "SELECT daily_limit, monthly_limit, roast_mode FROM user_settings WHERE user_id = $1",
+        `SELECT ${ALL_COLUMNS.join(", ")} FROM user_settings WHERE user_id = $1`,
         [session.sub]
       );
-      const row = result.rows[0];
-      return res.status(200).json({
-        dailyLimit: row && row.daily_limit !== null ? Number(row.daily_limit) : null,
-        monthlyLimit: row && row.monthly_limit !== null ? Number(row.monthly_limit) : null,
-        roastMode: row ? Boolean(row.roast_mode) : false,
-      });
+      const row = result.rows[0] || {};
+      const out = {};
+      for (const [key, def] of Object.entries(FIELD_DEFS)) {
+        out[key] = def.fromRow(row[def.column]);
+      }
+      return res.status(200).json(out);
     }
 
     if (req.method === "PUT") {
       const body = req.body || {};
 
-      // Read existing row first so a partial update (e.g. only roastMode)
+      // Read existing row first so a partial update (e.g. only one field)
       // never accidentally wipes out fields the caller didn't intend to touch.
       const existingResult = await query(
-        "SELECT daily_limit, monthly_limit, roast_mode FROM user_settings WHERE user_id = $1",
+        `SELECT ${ALL_COLUMNS.join(", ")} FROM user_settings WHERE user_id = $1`,
         [session.sub]
       );
       const existing = existingResult.rows[0] || {};
 
-      const dailyProvided = Object.prototype.hasOwnProperty.call(body, "dailyLimit");
-      const monthlyProvided = Object.prototype.hasOwnProperty.call(body, "monthlyLimit");
-      const roastProvided = Object.prototype.hasOwnProperty.call(body, "roastMode");
-
-      function normalizeLimit(v) {
-        if (v === null || v === undefined || v === "") return null;
-        return Math.max(0, Math.round(Number(v) * 100) / 100);
+      const finalValues = {};
+      for (const [key, def] of Object.entries(FIELD_DEFS)) {
+        const provided = Object.prototype.hasOwnProperty.call(body, key);
+        finalValues[key] = provided ? def.normalize(body[key]) : def.fromRow(existing[def.column]);
       }
 
-      const dl = dailyProvided
-        ? normalizeLimit(body.dailyLimit)
-        : existing.daily_limit !== undefined && existing.daily_limit !== null
-        ? Number(existing.daily_limit)
-        : null;
-      const ml = monthlyProvided
-        ? normalizeLimit(body.monthlyLimit)
-        : existing.monthly_limit !== undefined && existing.monthly_limit !== null
-        ? Number(existing.monthly_limit)
-        : null;
-      const roast = roastProvided ? Boolean(body.roastMode) : Boolean(existing.roast_mode);
-
-      if (dl !== null && Number.isNaN(dl)) {
+      if (finalValues.dailyLimit !== null && Number.isNaN(finalValues.dailyLimit)) {
         return res.status(400).json({ error: "Daily limit must be a number." });
       }
-      if (ml !== null && Number.isNaN(ml)) {
+      if (finalValues.monthlyLimit !== null && Number.isNaN(finalValues.monthlyLimit)) {
         return res.status(400).json({ error: "Monthly limit must be a number." });
       }
+      if (finalValues.savingsTarget !== null && Number.isNaN(finalValues.savingsTarget)) {
+        return res.status(400).json({ error: "Savings target must be a number." });
+      }
+
+      const keys = Object.keys(FIELD_DEFS);
+      const columns = keys.map((k) => FIELD_DEFS[k].column);
+      const placeholders = columns.map((_, i) => `$${i + 2}`);
+      const updateSet = columns.map((col, i) => `${col} = $${i + 2}`).join(", ");
+      const values = [session.sub, ...keys.map((k) => finalValues[k])];
 
       await query(
-        `INSERT INTO user_settings (user_id, daily_limit, monthly_limit, roast_mode, updated_at)
-         VALUES ($1, $2, $3, $4, now())
+        `INSERT INTO user_settings (user_id, ${columns.join(", ")}, updated_at)
+         VALUES ($1, ${placeholders.join(", ")}, now())
          ON CONFLICT (user_id)
-         DO UPDATE SET daily_limit = $2, monthly_limit = $3, roast_mode = $4, updated_at = now()`,
-        [session.sub, dl, ml, roast]
+         DO UPDATE SET ${updateSet}, updated_at = now()`,
+        values
       );
 
-      return res.status(200).json({ dailyLimit: dl, monthlyLimit: ml, roastMode: roast });
+      return res.status(200).json(finalValues);
     }
 
     return res.status(405).json({ error: "Method not allowed" });

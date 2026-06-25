@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import Head from "next/head";
+import Link from "next/link";
 import AuthScreen from "@/components/AuthScreen";
 import CoinMascot from "@/components/CoinMascot";
 import DonutChart from "@/components/DonutChart";
@@ -846,6 +847,29 @@ export default function Home() {
         {/* ---- Health score ---- */}
         <div className="px-4 pt-[26px]">
           <HealthScoreCard score={stats.healthScore} />
+        </div>
+
+        {/* ---- Coach Tup entry point ---- */}
+        <div className="px-4 pt-[26px]">
+          <Link
+            href="/coach"
+            className="flex items-center gap-3.5 rounded-[18px] p-4"
+            style={{
+              background: "linear-gradient(135deg, var(--navy) 0%, var(--navy-light) 100%)",
+              color: "var(--cream)",
+            }}
+          >
+            <CoinMascot expression="happy" accessory="coach" size={48} />
+            <div className="flex-1">
+              <div className="font-bold" style={{ fontSize: 15 }}>
+                Talk to Coach Tup
+              </div>
+              <div className="text-xs mt-0.5" style={{ color: "rgba(244,239,227,.6)" }}>
+                See where your money actually goes, and what it could become.
+              </div>
+            </div>
+            <span style={{ color: "var(--copper)", fontSize: 18 }}>&rarr;</span>
+          </Link>
         </div>
 
         {/* ---- Goals ---- */}
