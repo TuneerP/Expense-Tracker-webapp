@@ -16,10 +16,8 @@
   --radius: 18px;
 
   --coin-body: #d2691e;
-  --coin-rim: #e8a659;
-  --coin-dark: #5c2e0e;
-  --coin-blush: #f2c57c;
-  --coin-sparkle: #fff4de;
+  --coin-rim: #ebac60;
+  --coin-dark: #2d190c;
 }
 
 * {
@@ -182,6 +180,58 @@ select {
   animation: stampSlam 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
+/* ---- Financial Climb scene motion: deliberately slow and gentle ---- */
+@keyframes cloudDrift {
+  0% {
+    transform: translateX(-8px);
+  }
+  100% {
+    transform: translateX(8px);
+  }
+}
+.climb-cloud-drift {
+  animation: cloudDrift 14s ease-in-out infinite alternate;
+}
+.climb-cloud-drift-slow {
+  animation: cloudDrift 19s ease-in-out infinite alternate;
+}
+
+@keyframes rainFall {
+  0% {
+    transform: translateY(-6px);
+    opacity: 0;
+  }
+  30% {
+    opacity: 0.6;
+  }
+  100% {
+    transform: translateY(10px);
+    opacity: 0;
+  }
+}
+.climb-rain line,
+.climb-rain-heavy line {
+  animation: rainFall 1s linear infinite;
+}
+.climb-rain-heavy line {
+  animation-duration: 0.6s;
+}
+
+@keyframes lightningFlash {
+  0%,
+  92%,
+  100% {
+    opacity: 0;
+  }
+  94%,
+  97% {
+    opacity: 1;
+  }
+}
+.climb-lightning {
+  animation: lightningFlash 6s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   .coin-spin,
@@ -191,7 +241,12 @@ select {
   .sparkle-float,
   .confetti-pixel,
   .shake-it,
-  .stamp-slam {
+  .stamp-slam,
+  .climb-cloud-drift,
+  .climb-cloud-drift-slow,
+  .climb-rain line,
+  .climb-rain-heavy line,
+  .climb-lightning {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
   }
